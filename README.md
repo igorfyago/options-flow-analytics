@@ -2,7 +2,24 @@
 
 Real-time options analytics: dealer positioning (GEX / DEX) computed live from option chains and flow, to read market regimes and generate trading signals. Dealer positioning is the most mechanically explainable force in intraday markets, so I built the system I wanted to exist.
 
-> Showcase repository: the architecture, data model and design decisions are public; the collector source is private while the system trades live. Happy to walk through any of it.
+> This repository is a working MVP of the architecture: Rust collector, PostgreSQL, Node.js API + dashboard, one command to run, no API keys needed (a synthetic market-data provider generates realistic chains). The production feed adapter I run privately stays private; the `MarketDataProvider` trait is where a real feed plugs in.
+
+## Run it
+
+```bash
+docker compose up --build
+# dashboard: http://localhost:3000
+```
+
+Local dev: `cd collector && cargo test && cargo run` (needs a local Postgres, see `DATABASE_URL` default) and `cd api && npm install && npm start`.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `TICKERS` | `SPY,QQQ` | comma-separated tickers to snapshot |
+| `INTERVAL_SECS` | `30` | seconds between snapshot cycles |
+| `PROVIDER` | `synthetic` | market-data source (`synthetic` ships with the MVP) |
+| `SYNTHETIC_SPOT` | `500` | base spot for the synthetic walk |
+| `RETENTION_DAYS` | `30` | pruning horizon for old snapshots |
 
 ## Architecture
 
@@ -50,6 +67,14 @@ Retention is a pruning job, additive schema evolution only (new columns with def
 - **Postgres in Docker on EC2 rather than RDS**: at personal scale, one instance with volume snapshots costs a fraction of managed Postgres, and I wanted to own the failure modes
 - **Deterministic pipeline, no ML in the hot path**: positioning math is exact; interpretation is layered on top and can be rebuilt from raw snapshots (`raw_options` is kept per row)
 
+## Layout
+
+```
+collector/   Rust: provider -> greeks -> analytics -> db   (unit-tested: cargo test)
+api/         Node.js/Express API + self-contained dashboard (public/index.html)
+schema.sql   the data model, embedded by the collector at compile time
+```
+
 ## Stack
 
-Rust (Tokio, REST/WebSocket clients) · PostgreSQL · Node.js/Express · Docker · AWS EC2
+Rust (Tokio, tokio-postgres) · PostgreSQL · Node.js/Express · Docker Compose · AWS EC2

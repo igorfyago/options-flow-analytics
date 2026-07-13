@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: options
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d options"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  collector:
+    build:
+      context: .
+      dockerfile: collector/Dockerfile
+    environment:
+      DATABASE_URL: host=postgres user=postgres password=postgres dbname=options
+      TICKERS: ${TICKERS:-SPY,QQQ}
+      INTERVAL_SECS: ${INTERVAL_SECS:-30}
+      PROVIDER: ${PROVIDER:-synthetic}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/options
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

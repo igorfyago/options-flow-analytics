@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>options-flow-analytics</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#21262d; --text:#e6edf3; --dim:#8b949e;
+          --green:#3fb950; --red:#f85149; --amber:#d29922; --accent:#58a6ff; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,'Segoe UI',sans-serif; padding:24px; }
+  h1 { font-size:18px; font-weight:600; margin-bottom:2px; }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:20px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 18px; min-width:150px; }
+  .card .k { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .card .v { font-size:22px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .light { width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:-1px; }
+  .green { background:var(--green); box-shadow:0 0 10px var(--green); }
+  .red { background:var(--red); box-shadow:0 0 10px var(--red); }
+  .amber { background:var(--amber); box-shadow:0 0 10px var(--amber); }
+  #profile { margin-top:24px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; }
+  #profile h2 { font-size:13px; color:var(--dim); font-weight:600; margin-bottom:12px; text-transform:uppercase; letter-spacing:.06em; }
+  .strike-row { display:flex; align-items:center; gap:8px; height:16px; }
+  .strike-label { width:56px; text-align:right; color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; }
+  .bar-track { flex:1; display:flex; height:10px; }
+  .bar-neg, .bar-pos { height:100%; }
+  .bar-neg { margin-left:auto; background:var(--red); border-radius:3px 0 0 3px; }
+  .bar-pos { background:var(--green); border-radius:0 3px 3px 0; }
+  .half { width:50%; display:flex; }
+  .half.left { justify-content:flex-end; }
+  .spot-line { border-top:1px dashed var(--accent); position:relative; margin:2px 0; }
+  .spot-line span { position:absolute; right:0; top:-9px; font-size:10px; color:var(--accent); background:var(--panel); padding:0 4px; }
+  .flip-line { border-top:1px dashed var(--amber); position:relative; margin:2px 0; }
+  .flip-line span { position:absolute; right:60px; top:-9px; font-size:10px; color:var(--amber); background:var(--panel); padding:0 4px; }
+  #err { color:var(--red); margin-top:16px; }
+  .walls { color:var(--dim); font-size:12px; margin-top:10px; }
+  .walls b { color:var(--text); }
+</style>
+</head>
+<body>
+  <h1>options-flow-analytics</h1>
+  <div class="sub">GEX / DEX dealer positioning · <span id="meta">loading…</span></div>
+  <div class="row" id="cards"></div>
+  <div id="profile" hidden>
+    <h2>Net GEX per strike</h2>
+    <div id="bars"></div>
+    <div class="walls" id="walls"></div>
+  </div>
+  <div id="err"></div>
+
+<script>
+const fmtM = v => (v == null) ? "n/a" : (Math.abs(v) >= 1e9 ? (v/1e9).toFixed(2)+"B" : (v/1e6).toFixed(1)+"M");
+const fmt = (v, d=2) => v == null ? "n/a" : Number(v).toFixed(d);
+
+function card(k, v, extra="") {
+  return `<div class="card"><div class="k">${k}</div><div class="v">${extra}${v}</div></div>`;
+}
+
+async function refresh() {
+  try {
+    const tickers = await (await fetch("/api/tickers")).json();
+    if (!tickers.length) throw new Error("no data yet, collector warming up");
+    const t = new URLSearchParams(location.search).get("t") || tickers[0];
+    const s = await (await fetch(`/api/snapshots/${t}/latest`)).json();
+    if (s.error) throw new Error(s.error);
+
+    document.getElementById("meta").textContent =
+      `${t} · expiry ${s.expiry?.slice(0,10)} · snapshot ${new Date(s.timestamp).toLocaleTimeString()}`;
+
+    const em = (s.expected_moves && s.expected_moves[0] && s.expected_moves[0].one_sigma) || null;
+    document.getElementById("cards").innerHTML =
+      card("Signal", s.traffic_light, `<span class="light ${s.traffic_light}"></span>`) +
+      card("Spot", fmt(s.spot)) +
+      card("Net GEX", fmtM(s.net_gex_total)) +
+      card("Gamma flip", fmt(s.gamma_flip, 1)) +
+      card("Regime", (s.regime || "").replace("_", " ")) +
+      card("ATM IV", s.atm_iv == null ? "n/a" : (s.atm_iv * 100).toFixed(1) + "%") +
+      card("1σ move", fmt(em, 1)) +
+      card("Net DEX", fmtM(s.net_delta_exposure)) +
+      card("VIX", fmt(s.vix_current, 1));
+
+    // GEX-per-strike profile, top-down (high strikes first), spot & flip markers.
+    const per = (s.gex_per_strike || []).slice().sort((a, b) => b.strike - a.strike);
+    const max = Math.max(...per.map(p => Math.abs(p.net_gex)), 1);
+    let html = "", spotDrawn = false, flipDrawn = false;
+    for (const p of per) {
+      if (!spotDrawn && p.strike <= s.spot) {
+        html += `<div class="spot-line"><span>spot ${fmt(s.spot)}</span></div>`; spotDrawn = true;
+      }
+      if (!flipDrawn && s.gamma_flip != null && p.strike <= s.gamma_flip) {
+        html += `<div class="flip-line"><span>flip ${fmt(s.gamma_flip,1)}</span></div>`; flipDrawn = true;
+      }
+      const w = Math.abs(p.net_gex) / max * 100;
+      html += `<div class="strike-row">
+        <div class="strike-label">${p.strike}</div>
+        <div class="bar-track">
+          <div class="half left">${p.net_gex < 0 ? `<div class="bar-neg" style="width:${w}%"></div>` : ""}</div>
+          <div class="half">${p.net_gex >= 0 ? `<div class="bar-pos" style="width:${w}%"></div>` : ""}</div>
+        </div></div>`;
+    }
+    document.getElementById("bars").innerHTML = html;
+    document.getElementById("profile").hidden = false;
+
+    const cw = (s.call_walls || []).map(w => `<b>${w.strike}</b>`).join(", ") || "n/a";
+    const pw = (s.put_walls || []).map(w => `<b>${w.strike}</b>`).join(", ") || "n/a";
+    document.getElementById("walls").innerHTML = `call walls: ${cw} &nbsp;·&nbsp; put walls: ${pw}`;
+    document.getElementById("err").textContent = "";
+  } catch (e) {
+    document.getElementById("err").textContent = e.message;
+  }
+}
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
