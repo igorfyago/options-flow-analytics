@@ -1,0 +1,77 @@
+# Postgres for dev/small clusters. In a managed cloud, replace this whole
+# file with RDS/CloudSQL and point the `db-conn` secret at it — nothing
+# else in the stack changes.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-conn
+  namespace: options-flow
+type: Opaque
+stringData:
+  # CHANGE ME outside of demos. Both apps read their own key.
+  POSTGRES_PASSWORD: postgres
+  DATABASE_URL_RUST: host=postgres user=postgres password=postgres dbname=options
+  DATABASE_URL_NODE: postgres://postgres:postgres@postgres:5432/options
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: options-flow
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: options-flow
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-conn
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: options
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "options"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

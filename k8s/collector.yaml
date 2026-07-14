@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  namespace: options-flow
+spec:
+  replicas: 1 # single writer by design; scale by sharding TICKERS per replica
+  strategy:
+    type: Recreate # never two writers during rollout
+  selector:
+    matchLabels:
+      app: collector
+  template:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      containers:
+        - name: collector
+          image: ghcr.io/igorfyago/options-flow-collector:latest # or your registry
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-conn
+                  key: DATABASE_URL_RUST
+            - name: PROVIDER
+              value: cboe
+            - name: TICKERS
+              value: SPY,QQQ
+            - name: INTERVAL_SECS
+              value: "60"
+            - name: RETENTION_DAYS
+              value: "30"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi

@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: options-flow
+spec:
+  replicas: 2 # stateless: scale freely behind the Service
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/igorfyago/options-flow-api:latest # or your registry
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-conn
+                  key: DATABASE_URL_NODE
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 192Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: options-flow
+spec:
+  selector:
+    app: api
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+# Ingress assumes an nginx ingress controller; swap class/annotations for
+# ALB (EKS), Traefik, etc. For local clusters: kubectl -n options-flow
+# port-forward svc/api 3000:80
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  namespace: options-flow
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: options.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80

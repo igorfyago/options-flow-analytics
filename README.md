@@ -2,7 +2,7 @@
 
 Real-time options analytics: dealer positioning (GEX / DEX) computed live from option chains and flow, to read market regimes and generate trading signals. Dealer positioning is the most mechanically explainable force in intraday markets, so I built the system I wanted to exist.
 
-> This repository is a working MVP of the architecture: Rust collector, PostgreSQL, Node.js API + dashboard, one command to run, no API keys needed (a synthetic market-data provider generates realistic chains). The production feed adapter I run privately stays private; the `MarketDataProvider` trait is where a real feed plugs in.
+> This repository is a working MVP of the architecture: Rust collector, PostgreSQL, Node.js API + dashboard, one command to run. **By default it runs on real market data**: CBOE's free delayed-quotes feed (15-min delayed chains with IV and open interest, no API key). A synthetic provider ships alongside for offline demos, and the `MarketDataProvider` trait is where any other feed plugs in.
 
 ## Run it
 
@@ -17,9 +17,16 @@ Local dev: `cd collector && cargo test && cargo run` (needs a local Postgres, se
 |---|---|---|
 | `TICKERS` | `SPY,QQQ` | comma-separated tickers to snapshot |
 | `INTERVAL_SECS` | `30` | seconds between snapshot cycles |
-| `PROVIDER` | `synthetic` | market-data source (`synthetic` ships with the MVP) |
+| `PROVIDER` | `cboe` | `cboe` = real delayed data, no key · `synthetic` = offline generator |
 | `SYNTHETIC_SPOT` | `500` | base spot for the synthetic walk |
 | `RETENTION_DAYS` | `30` | pruning horizon for old snapshots |
+
+The CBOE provider takes the nearest listed expiry (DTE ≥ 1), where dealer positioning concentrates; CBOE also returns its own greeks per contract, which make a handy cross-check against the ones computed here.
+
+## Deploy
+
+- **AWS**: single-EC2 tier (what I run) and the managed-services growth path: [docs/DEPLOY_AWS.md](docs/DEPLOY_AWS.md)
+- **Kubernetes**: manifests in [`k8s/`](k8s/) (namespace, Postgres StatefulSet, single-writer collector Deployment with `Recreate` strategy, scalable API Deployment + Service + Ingress, probes on `/healthz`). Validated with kubeconform. Local: `kubectl apply -f k8s/ && kubectl -n options-flow port-forward svc/api 3000:80`
 
 ## Architecture
 

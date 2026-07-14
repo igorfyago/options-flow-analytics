@@ -22,7 +22,7 @@ services:
       DATABASE_URL: host=postgres user=postgres password=postgres dbname=options
       TICKERS: ${TICKERS:-SPY,QQQ}
       INTERVAL_SECS: ${INTERVAL_SECS:-30}
-      PROVIDER: ${PROVIDER:-synthetic}
+      PROVIDER: ${PROVIDER:-cboe}
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
     depends_on:
       postgres:

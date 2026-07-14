@@ -1,15 +1,16 @@
-//! Market-data providers. The MVP ships with a synthetic provider that
-//! generates a realistic chain (IV smile, OI concentration at round strikes)
-//! so the full pipeline runs with zero credentials. A real REST/WebSocket
-//! provider implements the same trait and is selected via `PROVIDER=` env.
+//! Market-data providers. Default is the real CBOE delayed feed (free, no
+//! key). `PROVIDER=synthetic` selects the generator, which produces a
+//! realistic chain (IV smile, OI concentration) for offline/demo runs.
 
 use crate::models::{ChainSnapshot, OptionContract, OptionKind};
 use anyhow::Result;
+use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use rand::Rng;
 
+#[async_trait]
 pub trait MarketDataProvider: Send {
-    fn fetch_chain(&mut self, ticker: &str) -> Result<ChainSnapshot>;
+    async fn fetch_chain(&mut self, ticker: &str) -> Result<ChainSnapshot>;
 }
 
 /// Synthetic chain generator: spot follows a slow random walk per ticker,
@@ -26,17 +27,22 @@ impl SyntheticProvider {
     }
 }
 
+#[async_trait]
 impl MarketDataProvider for SyntheticProvider {
-    fn fetch_chain(&mut self, ticker: &str) -> Result<ChainSnapshot> {
-        let mut rng = rand::thread_rng();
-
-        // Slow mean-reverting walk so consecutive snapshots look like a market.
-        self.drift_state = 0.95 * self.drift_state + rng.gen_range(-0.4..0.4);
-        let spot = self.base_spot * (1.0 + self.drift_state / 100.0);
+    async fn fetch_chain(&mut self, ticker: &str) -> Result<ChainSnapshot> {
+        let (spot, atm_iv, vix) = {
+            let mut rng = rand::thread_rng();
+            self.drift_state = 0.95 * self.drift_state + rng.gen_range(-0.4..0.4);
+            (
+                self.base_spot * (1.0 + self.drift_state / 100.0),
+                rng.gen_range(0.16..0.24),
+                rng.gen_range(13.0..22.0),
+            )
+        };
 
         let expiry = (Utc::now() + Duration::days(14)).date_naive();
-        let atm_iv = rng.gen_range(0.16..0.24);
         let mut contracts = Vec::new();
+        let mut rng = rand::thread_rng();
 
         let mut pct = -15.0_f64;
         while pct <= 15.0 {
@@ -71,7 +77,7 @@ impl MarketDataProvider for SyntheticProvider {
         Ok(ChainSnapshot {
             ticker: ticker.to_string(),
             spot,
-            vix: Some(rng.gen_range(13.0..22.0)),
+            vix: Some(vix),
             taken_at: Utc::now(),
             contracts,
         })
@@ -80,11 +86,18 @@ impl MarketDataProvider for SyntheticProvider {
 
 pub fn from_env() -> Box<dyn MarketDataProvider> {
     match std::env::var("PROVIDER").as_deref() {
-        Ok("synthetic") | Err(_) => Box::new(SyntheticProvider::new(
+        Ok("synthetic") => Box::new(SyntheticProvider::new(
             std::env::var("SYNTHETIC_SPOT").ok().and_then(|s| s.parse().ok()).unwrap_or(500.0),
         )),
+        Ok("cboe") | Err(_) => match crate::cboe::CboeProvider::new() {
+            Ok(p) => Box::new(p),
+            Err(e) => {
+                eprintln!("cboe provider init failed ({e}); falling back to synthetic");
+                Box::new(SyntheticProvider::new(500.0))
+            }
+        },
         Ok(other) => {
-            eprintln!("provider '{other}' not built into the MVP; falling back to synthetic");
+            eprintln!("unknown provider '{other}'; falling back to synthetic");
             Box::new(SyntheticProvider::new(500.0))
         }
     }

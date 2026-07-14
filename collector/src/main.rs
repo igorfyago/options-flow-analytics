@@ -1,4 +1,5 @@
 mod analytics;
+mod cboe;
 mod db;
 mod greeks;
 mod models;
@@ -33,7 +34,7 @@ async fn main() -> Result<()> {
 
     loop {
         for ticker in &tickers {
-            match provider.fetch_chain(ticker) {
+            match provider.fetch_chain(ticker).await {
                 Ok(chain) => {
                     let a = analytics::compute(&chain);
                     match db::insert_snapshot(&client, &a).await {
