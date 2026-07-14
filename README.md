@@ -4,6 +4,10 @@ Real-time options analytics: dealer positioning (GEX / DEX) computed live from o
 
 > This repository is a working MVP of the architecture: Rust collector, PostgreSQL, Node.js API + dashboard, one command to run. **By default it runs on real market data**: CBOE's free delayed-quotes feed (15-min delayed chains with IV and open interest, no API key). A synthetic provider ships alongside for offline demos, and the `MarketDataProvider` trait is where any other feed plugs in.
 
+![Live dashboard: SPY dealer positioning — GEX per strike with call/put walls, gamma flip, ±1σ expected-move band, signal meter and history sparklines](docs/img/dashboard.png)
+
+*Live SPY snapshot: a −743M put wall at 745 and a +547M call wall at 757 boxing in spot, the ±1σ expected-move band shaded, dealer regime and signal at a glance. Hover any strike for its full breakdown; the Table toggle exposes the entire chain.*
+
 ## Run it
 
 ```bash
