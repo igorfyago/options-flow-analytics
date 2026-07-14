@@ -5,111 +5,458 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>options-flow-analytics</title>
 <style>
-  :root { --bg:#0d1117; --panel:#161b22; --line:#21262d; --text:#e6edf3; --dim:#8b949e;
-          --green:#3fb950; --red:#f85149; --amber:#d29922; --accent:#58a6ff; }
-  * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,'Segoe UI',sans-serif; padding:24px; }
-  h1 { font-size:18px; font-weight:600; margin-bottom:2px; }
-  .sub { color:var(--dim); font-size:12px; margin-bottom:20px; }
-  .row { display:flex; gap:16px; flex-wrap:wrap; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 18px; min-width:150px; }
-  .card .k { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
-  .card .v { font-size:22px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
-  .light { width:14px; height:14px; border-radius:50%; display:inline-block; margin-right:8px; vertical-align:-1px; }
-  .green { background:var(--green); box-shadow:0 0 10px var(--green); }
-  .red { background:var(--red); box-shadow:0 0 10px var(--red); }
-  .amber { background:var(--amber); box-shadow:0 0 10px var(--amber); }
-  #profile { margin-top:24px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; }
-  #profile h2 { font-size:13px; color:var(--dim); font-weight:600; margin-bottom:12px; text-transform:uppercase; letter-spacing:.06em; }
-  .strike-row { display:flex; align-items:center; gap:8px; height:16px; }
-  .strike-label { width:56px; text-align:right; color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; }
-  .bar-track { flex:1; display:flex; height:10px; }
-  .bar-neg, .bar-pos { height:100%; }
-  .bar-neg { margin-left:auto; background:var(--red); border-radius:3px 0 0 3px; }
-  .bar-pos { background:var(--green); border-radius:0 3px 3px 0; }
-  .half { width:50%; display:flex; }
-  .half.left { justify-content:flex-end; }
-  .spot-line { border-top:1px dashed var(--accent); position:relative; margin:2px 0; }
-  .spot-line span { position:absolute; right:0; top:-9px; font-size:10px; color:var(--accent); background:var(--panel); padding:0 4px; }
-  .flip-line { border-top:1px dashed var(--amber); position:relative; margin:2px 0; }
-  .flip-line span { position:absolute; right:60px; top:-9px; font-size:10px; color:var(--amber); background:var(--panel); padding:0 4px; }
-  #err { color:var(--red); margin-top:16px; }
-  .walls { color:var(--dim); font-size:12px; margin-top:10px; }
-  .walls b { color:var(--text); }
+  /* Design tokens (dark mode selected) — palette per dataviz reference instance */
+  :root {
+    --plane:        #0d0d0d;
+    --surface:      #1a1a19;
+    --ink:          #ffffff;
+    --ink-2:        #c3c2b7;
+    --muted:        #898781;
+    --grid:         #2c2c2a;
+    --baseline:     #383835;
+    --border:       rgba(255,255,255,0.10);
+    --pos:          #3987e5;  /* diverging cool pole: dealers long gamma  */
+    --neg:          #e66767;  /* diverging warm pole: dealers short gamma */
+    --pos-wash:     rgba(57,135,229,0.10);
+    --accent:       #3987e5;
+    --good:         #0ca30c;
+    --warning:      #fab219;
+    --critical:     #d03b3b;
+    --radius:       10px;
+    font-size: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--plane); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px; max-width: 1280px; margin: 0 auto;
+  }
+
+  /* ---------- header ---------- */
+  header { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tab {
+    padding: 5px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: transparent; color: var(--ink-2); font: 600 13px/1 system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .tab:hover { background: var(--surface); }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ---------- stat tiles ---------- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .k { color: var(--muted); font-size: 11px; letter-spacing: .02em; }
+  .tile .v { font-size: 21px; font-weight: 600; margin-top: 3px; }
+  .tile .d { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
+
+  /* ---------- layout ---------- */
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .card h2 { font-size: 12px; font-weight: 650; color: var(--ink-2); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 4px; }
+  .card .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 10px; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+  /* ---------- signal ---------- */
+  .signal { display: flex; align-items: center; gap: 12px; }
+  .sig-icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; flex: none; }
+  .sig-label { font-size: 22px; font-weight: 650; text-transform: capitalize; }
+  .sig-sub { color: var(--muted); font-size: 12px; }
+  .meter { height: 6px; border-radius: 3px; background: var(--baseline); margin-top: 12px; position: relative; }
+  .meter .fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+  .meter .tick { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--muted); left: 50%; }
+  .meter-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; margin-top: 5px; }
+
+  /* ---------- legend & chart chrome ---------- */
+  .legend { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--ink-2); margin: 2px 0 10px; flex-wrap: wrap; }
+  .key { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 6px; vertical-align: -1px; }
+  .chart-head { display: flex; align-items: baseline; gap: 10px; }
+  .chart-head .spacer { flex: 1; }
+  .ghost-btn { background: none; border: 1px solid var(--border); color: var(--ink-2); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .ghost-btn:hover { background: rgba(255,255,255,0.04); }
+  svg text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  /* ---------- tooltip ---------- */
+  #tip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: #222220; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 11px; font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.5); min-width: 150px;
+  }
+  #tip .t { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  #tip .r { display: flex; justify-content: space-between; gap: 14px; }
+  #tip .r b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* ---------- table view ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: right; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  tr.spot-row td { color: var(--ink); font-weight: 650; }
+
+  .walls-list { display: grid; gap: 8px; }
+  .wall { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .wall .bar { height: 8px; border-radius: 0 4px 4px 0; }
+  .wall b { font-variant-numeric: tabular-nums; min-width: 44px; }
+  .wall span { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+
+  footer { color: var(--muted); font-size: 11px; margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  #err { color: var(--critical); margin: 12px 0; min-height: 0; }
 </style>
 </head>
-<body>
-  <h1>options-flow-analytics</h1>
-  <div class="sub">GEX / DEX dealer positioning · <span id="meta">loading…</span></div>
-  <div class="row" id="cards"></div>
-  <div id="profile" hidden>
-    <h2>Net GEX per strike</h2>
-    <div id="bars"></div>
-    <div class="walls" id="walls"></div>
+<body data-palette="#3987e5,#e66767">
+  <header>
+    <h1>options-flow-analytics</h1>
+    <div class="meta" id="meta">loading…</div>
+    <nav class="tabs" id="tabs" aria-label="ticker"></nav>
+  </header>
+
+  <div id="err" role="alert"></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="grid">
+    <section class="card" id="profile-card" hidden>
+      <div class="chart-head">
+        <div>
+          <h2>Net GEX per strike</h2>
+          <div class="sub" id="profile-sub"></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="ghost-btn" id="view-toggle" aria-pressed="false">Table</button>
+      </div>
+      <div class="legend">
+        <span><i class="key" style="background:var(--pos)"></i>dealers long gamma (net +)</span>
+        <span><i class="key" style="background:var(--neg)"></i>dealers short gamma (net −)</span>
+        <span><i class="key" style="background:var(--pos-wash);border:1px solid var(--border)"></i>±1σ expected move</span>
+      </div>
+      <div id="chart"></div>
+      <div id="table-wrap" hidden style="max-height:520px;overflow:auto"></div>
+    </section>
+
+    <div class="col">
+      <section class="card" id="signal-card" hidden>
+        <h2>Signal</h2>
+        <div class="signal">
+          <div class="sig-icon" id="sig-icon"></div>
+          <div>
+            <div class="sig-label" id="sig-label"></div>
+            <div class="sig-sub" id="sig-sub"></div>
+          </div>
+        </div>
+        <div class="meter"><div class="tick"></div><div class="fill" id="sig-fill"></div></div>
+        <div class="meter-scale"><span>−1 short-gamma</span><span>0</span><span>long-gamma +1</span></div>
+      </section>
+
+      <section class="card" id="walls-card" hidden>
+        <h2>Walls</h2>
+        <div class="sub">largest dealer-gamma concentrations</div>
+        <div class="walls-list" id="walls"></div>
+      </section>
+
+      <section class="card" id="spark-spot" hidden>
+        <h2>Spot</h2>
+        <div class="sub" id="spot-sub"></div>
+        <div class="spark" data-series="spot"></div>
+      </section>
+
+      <section class="card" id="spark-gex" hidden>
+        <h2>Net GEX</h2>
+        <div class="sub" id="gex-sub"></div>
+        <div class="spark" data-series="net_gex_total"></div>
+      </section>
+    </div>
   </div>
-  <div id="err"></div>
+
+  <div id="tip" role="tooltip"></div>
+
+  <footer>
+    <span>data: CBOE delayed quotes (15 min)</span><span>·</span>
+    <span>refreshes every 30s</span><span>·</span>
+    <span>research tooling, not investment advice</span><span>·</span>
+    <a href="https://github.com/igorfyago/options-flow-analytics" style="color:var(--muted)">source</a>
+  </footer>
 
 <script>
-const fmtM = v => (v == null) ? "n/a" : (Math.abs(v) >= 1e9 ? (v/1e9).toFixed(2)+"B" : (v/1e6).toFixed(1)+"M");
-const fmt = (v, d=2) => v == null ? "n/a" : Number(v).toFixed(d);
+"use strict";
+const $ = (s) => document.querySelector(s);
+const SV = getComputedStyle(document.documentElement);
+const C = (n) => SV.getPropertyValue(n).trim();
 
-function card(k, v, extra="") {
-  return `<div class="card"><div class="k">${k}</div><div class="v">${extra}${v}</div></div>`;
+const fmtC = (v) => v == null ? "n/a" :
+  Math.abs(v) >= 1e9 ? (v/1e9).toFixed(2) + "B" :
+  Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1) + "M" :
+  Math.abs(v) >= 1e3 ? (v/1e3).toFixed(1) + "K" : v.toFixed(0);
+const fmt = (v, d=2) => v == null ? "n/a" : Number(v).toFixed(d);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let ticker = new URLSearchParams(location.search).get("t");
+let snap = null, hist = [], tableMode = false;
+
+/* ---------------- tooltip ---------------- */
+const tip = $("#tip");
+function showTip(evt, title, rows) {
+  tip.innerHTML = `<div class="t">${esc(title)}</div>` +
+    rows.map(([k, v]) => `<div class="r"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("");
+  tip.style.display = "block";
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+  if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+const hideTip = () => tip.style.display = "none";
+
+/* ---------------- GEX profile (diverging horizontal bars) ---------------- */
+function barPath(x, y, w, h, dir) {
+  // 4px rounded data-end, square at the zero baseline
+  const r = Math.min(4, Math.abs(w), h / 2);
+  if (w >= 0) {
+    return `M${x},${y} h${w - r} a${r},${r} 0 0 1 ${r},${r} v${h - 2*r} a${r},${r} 0 0 1 ${-r},${r} h${-(w - r)} z`;
+  }
+  return `M${x},${y} h${w + r} a${r},${r} 0 0 0 ${-r},${r} v${h - 2*r} a${r},${r} 0 0 0 ${r},${r} h${-(w + r)} z`;
+}
+
+function renderProfile() {
+  const all = (snap.gex_per_strike || []).slice().sort((a, b) => b.strike - a.strike);
+  if (!all.length) return;
+  // Real chains list hundreds of strikes; the chart shows a spot-centered
+  // window (walls always included) and the table view carries the full chain.
+  const wallSet = new Set([...(snap.call_walls || []), ...(snap.put_walls || [])].map(w => w.strike));
+  const nearest = new Set(all.slice().sort((a, b) =>
+    Math.abs(a.strike - snap.spot) - Math.abs(b.strike - snap.spot)).slice(0, 44).map(p => p.strike));
+  let per = all.filter(p => nearest.has(p.strike) || wallSet.has(p.strike));
+  if (per.length < 12) per = all;
+  const cw = Math.min($("#profile-card").clientWidth - 34, 900);
+  const rowH = Math.max(13, Math.min(20, Math.floor(520 / per.length)));
+  const barH = rowH - 2;                       // 2px surface gap between bars
+  const mL = 58, mR = 74, mT = 26, mB = 8;
+  const H = per.length * rowH + mT + mB, W = cw;
+  const plotW = W - mL - mR;
+  const maxAbs = Math.max(...per.map(p => Math.abs(p.net_gex)), 1);
+  const zeroX = mL + plotW / 2;
+  const sx = (v) => zeroX + (v / maxAbs) * (plotW / 2) * 0.96;
+  const rowY = (i) => mT + i * rowH;
+  const strikeY = (k) => {                     // interpolate a price onto the strike axis
+    for (let i = 0; i < per.length - 1; i++) {
+      const a = per[i].strike, b = per[i + 1].strike;      // descending
+      if (k <= a && k >= b) return rowY(i) + rowH / 2 + (a - k) / (a - b || 1) * rowH;
+    }
+    return k > per[0].strike ? mT : mT + per.length * rowH;
+  };
+
+  const spot = snap.spot, flip = snap.gamma_flip;
+  const em = snap.expected_moves?.[0]?.one_sigma ?? null;
+  let g = "";
+
+  // ±1σ expected-move band (wash behind everything)
+  if (em != null) {
+    const y1 = strikeY(spot + em), y2 = strikeY(spot - em);
+    g += `<rect x="${mL}" y="${y1}" width="${plotW}" height="${Math.max(y2 - y1, 0)}" fill="${C('--pos-wash')}"/>`;
+  }
+
+  // vertical gridlines at clean GEX steps + top labels
+  const step = niceStep(maxAbs);
+  for (let v = -Math.floor(maxAbs / step) * step; v <= maxAbs; v += step) {
+    const x = sx(v);
+    g += `<line x1="${x}" y1="${mT}" x2="${x}" y2="${H - mB}" stroke="${v === 0 ? C('--baseline') : C('--grid')}" stroke-width="1"/>`;
+    g += `<text x="${x}" y="${mT - 9}" font-size="10" fill="${C('--muted')}" text-anchor="middle" font-variant-numeric="tabular-nums">${v === 0 ? "0" : fmtC(v)}</text>`;
+  }
+
+  // bars + strike labels
+  const maxPos = per.reduce((m, p) => p.net_gex > (m?.net_gex ?? -1e18) ? p : m, null);
+  const maxNeg = per.reduce((m, p) => p.net_gex < (m?.net_gex ?? 1e18) ? p : m, null);
+  per.forEach((p, i) => {
+    const y = rowY(i) + 1;
+    const w = sx(p.net_gex) - zeroX;
+    const col = p.net_gex >= 0 ? C('--pos') : C('--neg');
+    g += `<path d="${barPath(zeroX, y, w, barH)}" fill="${col}" data-i="${i}"/>`;
+    if (rowH >= 15 || i % 2 === 0) {
+      g += `<text x="${mL - 8}" y="${y + barH / 2 + 3.5}" font-size="10.5" fill="${C('--muted')}" text-anchor="end" font-variant-numeric="tabular-nums">${p.strike}</text>`;
+    }
+    // selective direct labels: only the two extremes
+    if (p === maxPos || p === maxNeg) {
+      const lx = zeroX + w + (w >= 0 ? 6 : -6);
+      g += `<text x="${lx}" y="${y + barH / 2 + 3.5}" font-size="10.5" fill="${C('--ink-2')}" text-anchor="${w >= 0 ? "start" : "end"}" font-variant-numeric="tabular-nums">${fmtC(p.net_gex)}</text>`;
+    }
+    // invisible full-row hover target (bigger than the mark)
+    g += `<rect x="${mL}" y="${rowY(i)}" width="${plotW}" height="${rowH}" fill="transparent" data-hover="${i}"/>`;
+  });
+
+  // spot + flip marker lines with right-side labels
+  const mark = (yv, color, label) => {
+    const y = strikeY(yv);
+    return `<line x1="${mL}" y1="${y}" x2="${W - mR + 4}" y2="${y}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5 4"/>` +
+      `<text x="${W - mR + 8}" y="${y + 3.5}" font-size="10.5" fill="${color}">${label}</text>`;
+  };
+  g += mark(spot, C('--ink-2'), `spot ${fmt(spot, 1)}`);
+  if (flip != null && flip > per[per.length - 1].strike && flip < per[0].strike) {
+    g += mark(flip, C('--warning'), `flip ${fmt(flip, 1)}`);
+  }
+
+  $("#chart").innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Net gamma exposure per strike">${g}</svg>`;
+
+  // hover wiring
+  $("#chart").querySelectorAll("[data-hover]").forEach(el => {
+    const p = per[+el.dataset.hover];
+    el.addEventListener("mousemove", (e) => showTip(e, `strike ${p.strike}`, [
+      ["net GEX", fmtC(p.net_gex)],
+      ["calls", fmtC(p.call_gex)],
+      ["puts", fmtC(p.put_gex)],
+      ["net DEX", fmtC(p.net_dex)],
+    ]));
+    el.addEventListener("mouseleave", hideTip);
+  });
+}
+
+function niceStep(maxAbs) {
+  const raw = maxAbs / 3;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (raw <= m * pow) return m * pow;
+  return raw;
+}
+
+/* ---------------- table view (accessibility contract) ---------------- */
+function renderTable() {
+  const per = (snap.gex_per_strike || []).slice().sort((a, b) => b.strike - a.strike);
+  const spotIdx = per.findIndex(p => p.strike <= snap.spot);
+  $("#table-wrap").innerHTML = `<table>
+    <thead><tr><th>strike</th><th>net GEX</th><th>call GEX</th><th>put GEX</th><th>net DEX</th></tr></thead>
+    <tbody>${per.map((p, i) =>
+      `<tr${i === spotIdx ? ' class="spot-row"' : ""}><td>${p.strike}${i === spotIdx ? " ← spot" : ""}</td><td>${fmtC(p.net_gex)}</td><td>${fmtC(p.call_gex)}</td><td>${fmtC(p.put_gex)}</td><td>${fmtC(p.net_dex)}</td></tr>`).join("")}
+    </tbody></table>`;
+}
+
+/* ---------------- sparklines (line + crosshair tooltip) ---------------- */
+function renderSpark(container, series, fmtV) {
+  const el = container.querySelector(".spark");
+  const pts = hist.map(h => ({ t: new Date(h.timestamp), v: +h[series] })).filter(p => isFinite(p.v));
+  if (pts.length < 2) { el.innerHTML = `<div style="color:var(--muted);font-size:12px">collecting history…</div>`; return; }
+  const W = 288, H = 64, mX = 2, mY = 6;
+  const lo = Math.min(...pts.map(p => p.v)), hi = Math.max(...pts.map(p => p.v));
+  const x = (i) => mX + i / (pts.length - 1) * (W - 2 * mX);
+  const y = (v) => hi === lo ? H / 2 : mY + (1 - (v - lo) / (hi - lo)) * (H - 2 * mY);
+  const d = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+  const last = pts[pts.length - 1];
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+      <path d="${d}" fill="none" stroke="${C('--accent')}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${x(pts.length - 1)}" cy="${y(last.v)}" r="4" fill="${C('--accent')}" stroke="${C('--surface')}" stroke-width="2"/>
+      <line id="xh" x1="0" y1="${mY}" x2="0" y2="${H - mY}" stroke="${C('--muted')}" stroke-width="1" visibility="hidden"/>
+      <rect x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
+    </svg>`;
+  const svg = el.querySelector("svg"), xh = el.querySelector("#xh");
+  svg.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(0, Math.min(pts.length - 1, Math.round((e.clientX - r.left) / r.width * (pts.length - 1))));
+    xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.setAttribute("visibility", "visible");
+    showTip(e, pts[i].t.toLocaleTimeString(), [[series === "spot" ? "spot" : "net GEX", fmtV(pts[i].v)]]);
+  });
+  svg.addEventListener("mouseleave", () => { xh.setAttribute("visibility", "hidden"); hideTip(); });
+  return last.v;
+}
+
+/* ---------------- tiles, signal, walls ---------------- */
+function tile(k, v, d) {
+  return `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ""}</div>`;
+}
+
+function render() {
+  const em = snap.expected_moves?.[0]?.one_sigma ?? null;
+  $("#meta").textContent =
+    `${ticker} · expiry ${String(snap.expiry).slice(0, 10)} · snapshot ${new Date(snap.timestamp).toLocaleTimeString()}`;
+
+  $("#tiles").innerHTML =
+    tile("Spot", fmt(snap.spot), snap.market_regime ? esc(snap.market_regime.replace("_", " ")) : "") +
+    tile("Net GEX", fmtC(snap.net_gex_total), "front expiry") +
+    tile("|GEX|", fmtC(snap.abs_gex_total)) +
+    tile("Gamma flip", snap.gamma_flip == null ? "—" : fmt(snap.gamma_flip, 1),
+         snap.gamma_flip == null ? "no zero-cross" : (snap.spot >= snap.gamma_flip ? "spot above" : "spot below")) +
+    tile("ATM IV", snap.atm_iv == null ? "—" : (snap.atm_iv * 100).toFixed(1) + "%") +
+    tile("±1σ move", em == null ? "—" : fmt(em, 1), em == null ? "" : `${fmt(snap.spot - em, 0)} – ${fmt(+snap.spot + +em, 0)}`) +
+    tile("Net DEX", fmtC(snap.net_delta_exposure)) +
+    tile("VIX", snap.vix_current == null ? "—" : fmt(snap.vix_current, 1));
+
+  // signal — status color + icon + words, never color alone
+  const s = snap.traffic_light, score = +snap.signal_score || 0;
+  const map = { green: ["--good", "▲", "supportive"], amber: ["--warning", "◆", "mixed"], red: ["--critical", "▼", "fragile"] };
+  const [cv, icon, word] = map[s] || map.amber;
+  $("#sig-icon").style.background = C(cv) + "26";
+  $("#sig-icon").style.color = C(cv);
+  $("#sig-icon").textContent = icon;
+  $("#sig-label").textContent = s;
+  $("#sig-sub").textContent = `${word} · ${snap.regime.replace("_", " ")} · score ${score.toFixed(2)}`;
+  const fill = $("#sig-fill");
+  fill.style.background = C(cv);
+  fill.style.left = score < 0 ? (50 + score * 50) + "%" : "50%";
+  fill.style.width = Math.abs(score) * 50 + "%";
+
+  // walls
+  const walls = [
+    ...(snap.call_walls || []).map(w => ({ ...w, side: "call" })),
+    ...(snap.put_walls || []).map(w => ({ ...w, side: "put" })),
+  ].sort((a, b) => Math.abs(b.gex) - Math.abs(a.gex));
+  const wMax = Math.max(...walls.map(w => Math.abs(w.gex)), 1);
+  $("#walls").innerHTML = walls.map(w =>
+    `<div class="wall"><b>${w.strike}</b>
+       <div class="bar" style="width:${Math.abs(w.gex) / wMax * 120}px;background:${w.side === "call" ? C('--pos') : C('--neg')}"></div>
+       <span>${w.side} · ${fmtC(w.gex)}</span></div>`).join("") ||
+    `<div class="sub">none detected</div>`;
+
+  ["#profile-card", "#signal-card", "#walls-card", "#spark-spot", "#spark-gex"].forEach(id => $(id).hidden = false);
+  $("#profile-sub").textContent =
+    `front expiry ${String(snap.expiry).slice(0, 10)} · chart: strikes nearest spot + walls · all ${snap.gex_per_strike?.length ?? 0} strikes in Table · shaded band = ±1σ`;
+
+  if (tableMode) { renderTable(); } else { renderProfile(); }
+  $("#table-wrap").hidden = !tableMode;
+  $("#chart").hidden = tableMode;
+
+  const lastSpot = renderSpark($("#spark-spot"), "spot", v => fmt(v, 2));
+  renderSpark($("#spark-gex"), "net_gex_total", fmtC);
+  $("#spot-sub").textContent = `last ${hist.length} snapshots`;
+  $("#gex-sub").textContent = `last ${hist.length} snapshots`;
+}
+
+/* ---------------- data plumbing ---------------- */
+async function j(url) {
+  const r = await fetch(url);
+  const b = await r.json();
+  if (!r.ok) throw new Error(b.error || r.statusText);
+  return b;
 }
 
 async function refresh() {
   try {
-    const tickers = await (await fetch("/api/tickers")).json();
-    if (!tickers.length) throw new Error("no data yet, collector warming up");
-    const t = new URLSearchParams(location.search).get("t") || tickers[0];
-    const s = await (await fetch(`/api/snapshots/${t}/latest`)).json();
-    if (s.error) throw new Error(s.error);
-
-    document.getElementById("meta").textContent =
-      `${t} · expiry ${s.expiry?.slice(0,10)} · snapshot ${new Date(s.timestamp).toLocaleTimeString()}`;
-
-    const em = (s.expected_moves && s.expected_moves[0] && s.expected_moves[0].one_sigma) || null;
-    document.getElementById("cards").innerHTML =
-      card("Signal", s.traffic_light, `<span class="light ${s.traffic_light}"></span>`) +
-      card("Spot", fmt(s.spot)) +
-      card("Net GEX", fmtM(s.net_gex_total)) +
-      card("Gamma flip", fmt(s.gamma_flip, 1)) +
-      card("Regime", (s.regime || "").replace("_", " ")) +
-      card("ATM IV", s.atm_iv == null ? "n/a" : (s.atm_iv * 100).toFixed(1) + "%") +
-      card("1σ move", fmt(em, 1)) +
-      card("Net DEX", fmtM(s.net_delta_exposure)) +
-      card("VIX", fmt(s.vix_current, 1));
-
-    // GEX-per-strike profile, top-down (high strikes first), spot & flip markers.
-    const per = (s.gex_per_strike || []).slice().sort((a, b) => b.strike - a.strike);
-    const max = Math.max(...per.map(p => Math.abs(p.net_gex)), 1);
-    let html = "", spotDrawn = false, flipDrawn = false;
-    for (const p of per) {
-      if (!spotDrawn && p.strike <= s.spot) {
-        html += `<div class="spot-line"><span>spot ${fmt(s.spot)}</span></div>`; spotDrawn = true;
-      }
-      if (!flipDrawn && s.gamma_flip != null && p.strike <= s.gamma_flip) {
-        html += `<div class="flip-line"><span>flip ${fmt(s.gamma_flip,1)}</span></div>`; flipDrawn = true;
-      }
-      const w = Math.abs(p.net_gex) / max * 100;
-      html += `<div class="strike-row">
-        <div class="strike-label">${p.strike}</div>
-        <div class="bar-track">
-          <div class="half left">${p.net_gex < 0 ? `<div class="bar-neg" style="width:${w}%"></div>` : ""}</div>
-          <div class="half">${p.net_gex >= 0 ? `<div class="bar-pos" style="width:${w}%"></div>` : ""}</div>
-        </div></div>`;
-    }
-    document.getElementById("bars").innerHTML = html;
-    document.getElementById("profile").hidden = false;
-
-    const cw = (s.call_walls || []).map(w => `<b>${w.strike}</b>`).join(", ") || "n/a";
-    const pw = (s.put_walls || []).map(w => `<b>${w.strike}</b>`).join(", ") || "n/a";
-    document.getElementById("walls").innerHTML = `call walls: ${cw} &nbsp;·&nbsp; put walls: ${pw}`;
-    document.getElementById("err").textContent = "";
+    const tickers = await j("/api/tickers");
+    if (!tickers.length) throw new Error("no data yet — collector warming up");
+    if (!ticker || !tickers.includes(ticker)) ticker = tickers[0];
+    $("#tabs").innerHTML = tickers.map(t =>
+      `<button class="tab${t === ticker ? " on" : ""}" data-t="${esc(t)}">${esc(t)}</button>`).join("");
+    $("#tabs").querySelectorAll(".tab").forEach(b => b.onclick = () => {
+      ticker = b.dataset.t;
+      history.replaceState(null, "", `?t=${ticker}`);
+      refresh();
+    });
+    [snap, hist] = await Promise.all([
+      j(`/api/snapshots/${ticker}/latest`),
+      j(`/api/snapshots/${ticker}/history?limit=120`),
+    ]);
+    $("#err").textContent = "";
+    render();
   } catch (e) {
-    document.getElementById("err").textContent = e.message;
+    $("#err").textContent = e.message;
   }
 }
+
+$("#view-toggle").onclick = () => {
+  tableMode = !tableMode;
+  $("#view-toggle").setAttribute("aria-pressed", String(tableMode));
+  $("#view-toggle").textContent = tableMode ? "Chart" : "Table";
+  render();
+};
+addEventListener("resize", () => { if (snap && !tableMode) renderProfile(); });
+
 refresh();
 setInterval(refresh, 30000);
 </script>
