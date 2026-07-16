@@ -4,31 +4,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>options-flow-analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   /* Design tokens (dark mode selected) — palette per dataviz reference instance */
   :root {
-    --plane:        #0d0d0d;
-    --surface:      #1a1a19;
-    --ink:          #ffffff;
-    --ink-2:        #c3c2b7;
-    --muted:        #898781;
-    --grid:         #2c2c2a;
-    --baseline:     #383835;
-    --border:       rgba(255,255,255,0.10);
-    --pos:          #3987e5;  /* diverging cool pole: dealers long gamma  */
-    --neg:          #e66767;  /* diverging warm pole: dealers short gamma */
-    --pos-wash:     rgba(57,135,229,0.10);
-    --accent:       #3987e5;
-    --good:         #0ca30c;
-    --warning:      #fab219;
-    --critical:     #d03b3b;
-    --radius:       10px;
+    /* aligned with the b4rruf3t.com portal design system (dark gallery) */
+    --plane:        #13151b;
+    --surface:      #1b1e26;
+    --ink:          #eceef4;
+    --ink-2:        #c6ccd8;
+    --muted:        #9ba3b2;
+    --grid:         #262a33;
+    --baseline:     #333845;
+    --border:       rgba(255,255,255,0.09);
+    --pos:          #7c8aff;  /* diverging cool pole: dealers long gamma  */
+    --neg:          #f4657f;  /* diverging warm pole: dealers short gamma */
+    --pos-wash:     rgba(124,138,255,0.10);
+    --accent:       #7c8aff;
+    --good:         #3ecf8e;
+    --warning:      #ffb454;
+    --critical:     #f4657f;
+    --radius:       8px;
     font-size: 14px;
   }
   * { box-sizing: border-box; margin: 0; }
   body {
     background: var(--plane); color: var(--ink);
-    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 14px/1.45 "Inter", system-ui, -apple-system, sans-serif;
     padding: 20px; max-width: 1280px; margin: 0 auto;
   }
 
@@ -39,7 +42,7 @@
   .tabs { display: flex; gap: 4px; margin-left: auto; }
   .tab {
     padding: 5px 14px; border-radius: 999px; border: 1px solid var(--border);
-    background: transparent; color: var(--ink-2); font: 600 13px/1 system-ui, sans-serif;
+    background: transparent; color: var(--ink-2); font: 600 13px/1 "Inter", system-ui, sans-serif;
     cursor: pointer;
   }
   .tab:hover { background: var(--surface); }
@@ -49,7 +52,7 @@
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 14px; }
   .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
   .tile .k { color: var(--muted); font-size: 11px; letter-spacing: .02em; }
-  .tile .v { font-size: 21px; font-weight: 600; margin-top: 3px; }
+  .tile .v { font-size: 21px; font-weight: 500; margin-top: 3px; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
   .tile .d { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
 
   /* ---------- layout ---------- */
@@ -77,12 +80,12 @@
   .chart-head .spacer { flex: 1; }
   .ghost-btn { background: none; border: 1px solid var(--border); color: var(--ink-2); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
   .ghost-btn:hover { background: rgba(255,255,255,0.04); }
-  svg text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  svg text { font-family: "Inter", system-ui, sans-serif; }
 
   /* ---------- tooltip ---------- */
   #tip {
     position: fixed; pointer-events: none; z-index: 10; display: none;
-    background: #222220; border: 1px solid var(--border); border-radius: 8px;
+    background: #1f232e; border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 11px; font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.5); min-width: 150px;
   }
   #tip .t { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
