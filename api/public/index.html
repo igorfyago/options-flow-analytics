@@ -433,7 +433,11 @@ async function refresh() {
   try {
     const tickers = await j("/api/tickers");
     if (!tickers.length) throw new Error("no data yet — collector warming up");
-    if (!ticker || !tickers.includes(ticker)) ticker = tickers[0];
+    // house order: SPY is the desk's ticker — always first and the default;
+    // QQQ is secondary, shown only if clicked
+    const rank = t => t === "SPY" ? 0 : t === "QQQ" ? 9 : 1;
+    tickers.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    if (!ticker || !tickers.includes(ticker)) ticker = tickers.includes("SPY") ? "SPY" : tickers[0];
     $("#tabs").innerHTML = tickers.map(t =>
       `<button class="tab${t === ticker ? " on" : ""}" data-t="${esc(t)}">${esc(t)}</button>`).join("");
     $("#tabs").querySelectorAll(".tab").forEach(b => b.onclick = () => {
