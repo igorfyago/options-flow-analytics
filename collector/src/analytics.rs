@@ -22,7 +22,10 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
     let mut strikes: BTreeMap<i64, StrikeExposure> = BTreeMap::new();
     let (mut net_dex, mut charm_total, mut vanna_total) = (0.0, 0.0, 0.0);
     let mut expiry = None;
-    let mut atm: Option<(f64, f64)> = None; // (distance, iv)
+    // Every qualifying contract's (distance from spot, iv). The ATM vol is a
+    // MEDIAN over the strikes nearest spot rather than one contract's quote,
+    // because a single bad or one-sided print used to set the whole surface.
+    let mut atm_pool: Vec<(f64, f64)> = Vec::new();
 
     for c in &chain.contracts {
         let dte = (c.expiry - today).num_days().max(0) as f64;
@@ -58,10 +61,7 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
         charm_total += g.charm * oi * CONTRACT_MULT;
         vanna_total += g.vanna * oi * CONTRACT_MULT;
 
-        let dist = (c.strike - spot).abs();
-        if atm.map_or(true, |(d, _)| dist < d) {
-            atm = Some((dist, c.implied_vol));
-        }
+        atm_pool.push(((c.strike - spot).abs(), c.implied_vol));
     }
 
     let per_strike: Vec<StrikeExposure> = strikes.into_values().collect();
@@ -69,7 +69,7 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
     let abs_gex_total: f64 = per_strike.iter().map(|s| s.net_gex.abs()).sum();
 
     let gamma_flip = find_flip(&per_strike);
-    let atm_iv = atm.map(|(_, iv)| iv);
+    let atm_iv = atm_iv_median(&mut atm_pool, spot);
 
     // 1-sigma expected move to the chain's expiry.
     let expected_move_1sd = match (atm_iv, expiry) {
@@ -135,6 +135,38 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
         traffic_light: traffic_light.to_string(),
         vix: chain.vix,
     }
+}
+
+/// How far from spot a contract may sit and still count as at the money.
+const ATM_IV_BAND: f64 = 0.02;
+
+/// ATM implied vol: the MEDIAN iv of the contracts closest to spot.
+///
+/// This used to be whichever single contract happened to sit nearest spot and
+/// arrive first, so one stale or one-sided quote set the entire vol surface.
+/// SPY came back at 10.5% while VIX was 18.8 and QQQ was 19.3, which made the
+/// expected-move band about half as wide as the tape and every indicative
+/// option price too cheap. Taking a median over both sides of the ATM strike
+/// and its neighbours survives a bad print.
+fn atm_iv_median(pool: &mut Vec<(f64, f64)>, spot: f64) -> Option<f64> {
+    if pool.is_empty() {
+        return None;
+    }
+    pool.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // Bound by DISTANCE first, not just by count: a thin chain has fewer than
+    // six contracts near the money, and taking six regardless reaches into the
+    // wings, where skew drags the median far above the real ATM vol.
+    let band = ATM_IV_BAND * spot;
+    let near = pool.iter().take_while(|(d, _)| *d <= band).count();
+    let take = near.clamp(1, 6);
+    let mut ivs: Vec<f64> = pool[..take].iter().map(|(_, iv)| *iv).collect();
+    ivs.sort_by(|a, b| a.total_cmp(b));
+    let mid = ivs.len() / 2;
+    Some(if ivs.len() % 2 == 0 {
+        (ivs[mid - 1] + ivs[mid]) / 2.0
+    } else {
+        ivs[mid]
+    })
 }
 
 /// Gamma flip: the strike level where cumulative net GEX (scanned from the
@@ -221,5 +253,43 @@ mod tests {
         let a = compute(&chain(vec![c]));
         assert_eq!(a.net_gex_total, 0.0);
         assert!(a.per_strike.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod atm_iv_tests {
+    use super::*;
+
+    #[test]
+    fn one_bad_quote_at_the_money_cannot_set_the_surface() {
+        // The SPY case: the contract nearest spot printed a nonsense 10.5%
+        // while everything around it agreed on roughly 19%. First-wins picked
+        // the outlier; the median must ignore it.
+        let mut pool = vec![
+            (0.0, 0.105),
+            (0.5, 0.191),
+            (0.5, 0.193),
+            (1.0, 0.190),
+            (1.0, 0.195),
+            (1.5, 0.192),
+            (40.0, 0.60),   // far wing, must not be reached
+        ];
+        let iv = atm_iv_median(&mut pool, 100.0).unwrap();
+        assert!(iv > 0.18 && iv < 0.20, "atm iv {iv} should sit with the cluster");
+    }
+
+    #[test]
+    fn far_wings_are_excluded_even_when_numerous() {
+        let mut pool = vec![(0.0, 0.20), (0.5, 0.20), (1.0, 0.20)];
+        for i in 0..50 {
+            pool.push((100.0 + i as f64, 0.90));   // deep OTM skew
+        }
+        let iv = atm_iv_median(&mut pool, 100.0).unwrap();
+        assert!((iv - 0.20).abs() < 1e-9, "wings leaked into atm iv: {iv}");
+    }
+
+    #[test]
+    fn an_empty_chain_has_no_atm_iv() {
+        assert!(atm_iv_median(&mut Vec::new(), 100.0).is_none());
     }
 }
