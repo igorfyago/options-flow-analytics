@@ -15,8 +15,15 @@ const RISK_FREE: f64 = 0.04;
 const CONTRACT_MULT: f64 = 100.0;
 
 pub fn compute(chain: &ChainSnapshot) -> Analytics {
+    compute_at(chain, Utc::now())
+}
+
+/// `compute` with the clock injected: session-aware DTE makes the answer
+/// depend on the time of day (a 0DTE chain is alive at 14:00 ET, dead at
+/// 16:01), so tests pin the instant instead of inheriting the wall clock.
+pub fn compute_at(chain: &ChainSnapshot, now: chrono::DateTime<Utc>) -> Analytics {
     let spot = chain.spot;
-    let today = Utc::now().date_naive();
+    let today = now.date_naive();
 
     // Aggregate per strike. BTreeMap keeps strikes ordered for the flip scan.
     let mut strikes: BTreeMap<i64, StrikeExposure> = BTreeMap::new();
@@ -28,12 +35,18 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
     let mut atm_pool: Vec<(f64, f64)> = Vec::new();
 
     for c in &chain.contracts {
-        let dte = (c.expiry - today).num_days().max(0) as f64;
-        if dte == 0.0 || c.implied_vol <= 0.0 || c.open_interest <= 0.0 {
+        // FRACTIONAL time, session-aware. Whole-day DTE skipped every 0DTE
+        // contract outright ("dte == 0"), so on the very tenor the desk
+        // trades the analytics went blind. A 0DTE chain at 14:00 ET has a
+        // quarter of a day of life and perfectly real greeks; only a chain
+        // whose close has PASSED is dead. The 0.02-day floor (~30 min) keeps
+        // the math finite at the expiry minute, mirroring the desk's engine.
+        let dte = crate::clock::dte_fraction(c.expiry, now);
+        if dte <= 0.0 || c.implied_vol <= 0.0 || c.open_interest <= 0.0 {
             continue;
         }
         expiry.get_or_insert(c.expiry);
-        let t = dte / 365.0;
+        let t = dte.max(0.02) / 365.0;
         let g = greeks(c.kind, spot, c.strike, t, c.implied_vol, RISK_FREE);
 
         let oi = c.open_interest;
@@ -74,7 +87,9 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
     // 1-sigma expected move to the chain's expiry.
     let expected_move_1sd = match (atm_iv, expiry) {
         (Some(iv), Some(exp)) => {
-            let dte = (exp - today).num_days().max(0) as f64;
+            // same session-aware clock as the greeks: a 0DTE chain still
+            // has an afternoon of variance, not zero
+            let dte = crate::clock::dte_fraction(exp, now).max(0.02);
             Some(spot * iv * (dte / 365.0).sqrt())
         }
         _ => None,
@@ -335,12 +350,26 @@ mod tests {
     }
 
     #[test]
-    fn expired_contracts_are_ignored() {
+    fn zero_dte_is_the_traded_tenor_alive_until_the_close() {
+        // The old rule skipped every 0DTE contract outright, which blinded
+        // the analytics on exactly the tenor the desk trades. Same chain,
+        // two instants: mid-session it carries real gamma, after the bell
+        // it is gone.
+        use chrono::TimeZone;
         let mut c = contract(OptionKind::Call, 100.0, 1000.0);
-        c.expiry = Utc::now().date_naive(); // 0 DTE -> skipped
-        let a = compute(&chain(vec![c]));
-        assert_eq!(a.net_gex_total, 0.0);
-        assert!(a.per_strike.is_empty());
+        c.expiry = chrono::NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
+
+        let mid_session = Utc.with_ymd_and_hms(2026, 7, 20, 15, 0, 0).unwrap();
+        let a = compute_at(&chain(vec![c.clone()]), mid_session);
+        assert!(a.net_gex_total > 0.0, "0DTE gamma must be real mid-session");
+        assert_eq!(a.per_strike.len(), 1);
+        // and the expected move reflects an afternoon, not a whole day
+        assert!(a.expected_move_1sd.unwrap() > 0.0);
+
+        let after_bell = Utc.with_ymd_and_hms(2026, 7, 20, 20, 30, 0).unwrap();
+        let b = compute_at(&chain(vec![c]), after_bell);
+        assert_eq!(b.net_gex_total, 0.0);
+        assert!(b.per_strike.is_empty());
     }
 }
 

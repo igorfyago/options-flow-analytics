@@ -85,17 +85,21 @@ impl MarketDataProvider for CboeProvider {
     async fn fetch_chain(&mut self, ticker: &str) -> Result<ChainSnapshot> {
         let body = self.get(ticker).await?;
         let spot = body.data.current_price;
-        let today = Utc::now().date_naive();
+        let now = Utc::now();
 
-        // Parse every contract, then keep the nearest expiry with DTE >= 1
-        // (the front chain is where dealer positioning concentrates).
+        // Parse every contract, then keep the nearest expiry still ALIVE:
+        // same-day contracts count until the 16:00 ET close, because the
+        // 0DTE chain is the tenor the desk actually trades. The old
+        // `num_days() >= 1` filter (whole days, UTC) never stored it - every
+        // session captured tomorrow's chain, Fridays a 3-day weekend one -
+        // and the roll to the next expiry happened a whole session early.
         let mut parsed: Vec<(NaiveDate, OptionContract)> = Vec::new();
         for o in &body.data.options {
             if o.iv <= 0.0 || o.open_interest <= 0.0 {
                 continue;
             }
             if let Some((kind, expiry, strike)) = parse_occ(&o.option) {
-                if (expiry - today).num_days() >= 1 {
+                if crate::clock::alive(expiry, now) {
                     parsed.push((
                         expiry,
                         OptionContract {
