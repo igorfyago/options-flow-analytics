@@ -68,7 +68,7 @@ pub fn compute(chain: &ChainSnapshot) -> Analytics {
     let net_gex_total: f64 = per_strike.iter().map(|s| s.net_gex).sum();
     let abs_gex_total: f64 = per_strike.iter().map(|s| s.net_gex.abs()).sum();
 
-    let gamma_flip = find_flip(&per_strike);
+    let gamma_flip = find_flip(&per_strike, spot);
     let atm_iv = atm_iv_median(&mut atm_pool, spot);
 
     // 1-sigma expected move to the chain's expiry.
@@ -174,27 +174,65 @@ fn atm_iv_median(pool: &mut Vec<(f64, f64)>, spot: f64) -> Option<f64> {
     })
 }
 
-/// Gamma flip: the strike level where cumulative net GEX (scanned from the
-/// lowest strike upward) crosses zero, linearly interpolated between strikes.
-fn find_flip(per_strike: &[StrikeExposure]) -> Option<f64> {
+/// Fraction of the chain's total absolute gamma that a zero-crossing must
+/// actually move for it to count as the flip.
+///
+/// Deep-OTM strikes carry gamma that is not zero but is numerical dust: on a
+/// real SPY chain the 21 strikes at or below 640 peaked at 0.23 of net_gex
+/// while the chain totalled 1.16e9. The cumulative sum wanders across zero
+/// down there for no economic reason, and a scan that takes the FIRST such
+/// crossing reported a flip at 620 with spot at 746 - a "tipping point" set
+/// by 0.0014 of gamma, roughly 1e-10 of the book. Requiring a crossing to
+/// swing a real share of the chain discards that dust.
+const FLIP_MIN_SHARE: f64 = 0.01;
+
+/// Gamma flip: the spot level where cumulative net GEX crosses zero,
+/// linearly interpolated between strikes.
+///
+/// Two rules keep the answer honest, and both exist because their absence
+/// produced a wrong number in production:
+///
+/// 1. A crossing only counts if the cumulative gamma on one side of it is at
+///    least `FLIP_MIN_SHARE` of the chain. Otherwise it is float dust.
+/// 2. Of the crossings that qualify, the one NEAREST SPOT wins. Scanning from
+///    the lowest strike and returning the first hit picks whichever crossing
+///    happens to sit furthest from the money, which is the least relevant one
+///    to today's tape.
+///
+/// Returning None is a legitimate answer: a chain whose cumulative gamma never
+/// meaningfully changes sign has no tipping point to trade against, and saying
+/// so beats inventing a level.
+fn find_flip(per_strike: &[StrikeExposure], spot: f64) -> Option<f64> {
+    let total: f64 = per_strike.iter().map(|s| s.net_gex.abs()).sum();
+    if total <= 0.0 {
+        return None;
+    }
+    let floor = total * FLIP_MIN_SHARE;
+
     let mut cum = 0.0;
-    let mut prev: Option<(f64, f64)> = None; // (strike, cum before this strike)
+    let mut prev: Option<(f64, f64)> = None; // (strike, cumulative through it)
+    let mut best: Option<f64> = None;
     for s in per_strike {
         let next = cum + s.net_gex;
         if let Some((p_strike, p_cum)) = prev {
-            if (p_cum < 0.0 && next >= 0.0) || (p_cum > 0.0 && next <= 0.0) {
+            let crosses = (p_cum < 0.0 && next >= 0.0) || (p_cum > 0.0 && next <= 0.0);
+            // the swing has to be real on at least one side, or it is dust
+            if crosses && p_cum.abs().max(next.abs()) >= floor {
                 let span = next - p_cum;
-                if span.abs() > f64::EPSILON {
-                    let frac = (0.0 - p_cum) / span;
-                    return Some(p_strike + frac * (s.strike - p_strike));
+                let level = if span.abs() > f64::EPSILON {
+                    p_strike + ((0.0 - p_cum) / span) * (s.strike - p_strike)
+                } else {
+                    s.strike
+                };
+                if best.is_none_or(|b| (level - spot).abs() < (b - spot).abs()) {
+                    best = Some(level);
                 }
-                return Some(s.strike);
             }
         }
         prev = Some((s.strike, next));
         cum = next;
     }
-    None
+    best
 }
 
 #[cfg(test)]
@@ -241,6 +279,51 @@ mod tests {
         ]));
         let flip = a.gamma_flip.expect("flip expected");
         assert!(flip > 90.0 && flip <= 110.0, "flip {flip} out of range");
+    }
+
+    /// Build a per-strike book directly, so the dust can be stated exactly.
+    fn exposures(rows: &[(f64, f64)]) -> Vec<StrikeExposure> {
+        rows.iter()
+            .map(|&(strike, net_gex)| StrikeExposure {
+                strike,
+                net_gex,
+                net_dex: 0.0,
+                put_gex: net_gex.min(0.0),
+                call_gex: net_gex.max(0.0),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn float_dust_far_from_spot_is_not_a_flip() {
+        // The production shape, 2026-07-20: spot 746.75, deep-OTM strikes
+        // carrying ~1e-5 of gamma that wobbles across zero, and the real book
+        // (hundreds of millions) sitting near the money and staying negative.
+        // The old scan returned 620 - a flip 127 points away decided by a
+        // rounding error. There is no true flip here, so the answer is None.
+        let mut rows = vec![
+            (500.0, -1.76e-05),
+            (620.0, 3.10e-05),   // the dust crossing the old code returned
+            (625.0, -2.00e-05),
+        ];
+        for k in 740..=755 {
+            rows.push((k as f64, -50_000_000.0)); // real gamma, one-sided
+        }
+        assert_eq!(find_flip(&exposures(&rows), 746.75), None);
+    }
+
+    #[test]
+    fn flip_nearest_spot_wins_over_a_distant_one() {
+        // Two crossings that both clear the noise floor. The one by the money
+        // is the tradable tipping point; the far one is history.
+        let rows = vec![
+            (600.0, -1_000_000.0),
+            (610.0, 2_000_000.0),   // crossing far below spot
+            (740.0, -3_000_000.0),  // crossing near spot
+            (750.0, 4_000_000.0),
+        ];
+        let flip = find_flip(&exposures(&rows), 746.0).expect("flip expected");
+        assert!(flip > 700.0, "picked the distant crossing: {flip}");
     }
 
     #[test]
