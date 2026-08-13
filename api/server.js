@@ -12,7 +12,12 @@ const pool = new Pool({
 });
 
 const app = express();
-app.use(express.static(path.join(__dirname, "public")));
+// no-cache = store but revalidate: the dashboard is one html file, and a
+// browser heuristically caching an old copy after a deploy is how other
+// estate apps have shipped a crashed mixed page. ETag makes this a cheap 304.
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+}));
 
 // Columns the dashboard needs (raw_options excluded to keep payloads lean).
 const COLS = `id, timestamp, ticker, expiry, spot, regime, net_gex_total,
